@@ -2388,6 +2388,9 @@ _hidden void libxl__device_vtpm_add(libxl__egc *egc, uint32_t domid,
                                    libxl_device_vtpm *vtpm,
                                    libxl__ao_device *aodev);
 
+void libxl__device_hvm_vtpm_add(libxl__gc *gc, uint32_t domid,
+                                libxl_device_vtpm *vtpm);
+
 /* Internal function to connect a vkb device */
 _hidden int libxl__device_vkb_add(libxl__gc *gc, uint32_t domid,
                                   libxl_device_vkb *vkb);

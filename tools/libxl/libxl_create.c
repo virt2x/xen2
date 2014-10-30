@@ -901,6 +901,12 @@ static void initiate_domain_create(libxl__egc *egc,
             d_config->nics[i].devid = ++last_devid;
     }
 
+    if (d_config->c_info.type == LIBXL_DOMAIN_TYPE_HVM &&
+        d_config->num_vtpms > 0) {
+        ret = libxl__device_vtpm_setdefault(gc, d_config->vtpms);
+        if (ret) goto error_out;
+    }
+
     if (restore_fd >= 0) {
         LOG(DEBUG, "restoring, not running bootloader");
         domcreate_bootloader_done(egc, &dcs->bl, 0);

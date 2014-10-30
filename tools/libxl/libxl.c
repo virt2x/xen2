@@ -2015,6 +2015,10 @@ void libxl__device_vtpm_add(libxl__egc *egc, uint32_t domid,
     flexarray_append(front, "handle");
     flexarray_append(front, GCSPRINTF("%d", vtpm->devid));
 
+    /*for para virtual machine*/
+    flexarray_append(front, "domain-type");
+    flexarray_append(front, GCSPRINTF("%d", LIBXL_DOMAIN_TYPE_PV));
+
     if (aodev->update_json) {
         lock = libxl__lock_domain_userdata(gc, domid);
         if (!lock) {
@@ -2070,6 +2074,64 @@ out:
     libxl_domain_config_dispose(&d_config);
     aodev->rc = rc;
     if(rc) aodev->callback(egc, aodev);
+    return;
+}
+
+void libxl__device_hvm_vtpm_add(libxl__gc *gc, uint32_t domid,
+                                libxl_device_vtpm *vtpm)
+{
+    flexarray_t *front;
+    flexarray_t *back;
+    libxl__device *device;
+    unsigned int rc;
+
+    rc = libxl__device_vtpm_setdefault(gc, vtpm);
+    if (rc) goto out;
+
+    front = flexarray_make(gc, 16, 1);
+    back = flexarray_make(gc, 16, 1);
+
+    if (vtpm->devid == -1) {
+        if ((vtpm->devid = libxl__device_nextid(gc, domid, "vtpm")) < 0) {
+            rc = ERROR_FAIL;
+            goto out;
+        }
+    }
+
+    GCNEW(device);
+    rc = libxl__device_from_vtpm(gc, domid, vtpm, device);
+    if ( rc != 0 ) goto out;
+    flexarray_append(back, "frontend-id");
+    flexarray_append(back, GCSPRINTF("%d", domid));
+    flexarray_append(back, "online");
+    flexarray_append(back, "1");
+    flexarray_append(back, "state");
+    flexarray_append(back, GCSPRINTF("%d", 1));
+    flexarray_append(back, "handle");
+    flexarray_append(back, GCSPRINTF("%d", vtpm->devid));
+
+    flexarray_append(back, "uuid");
+    flexarray_append(back, GCSPRINTF(LIBXL_UUID_FMT, LIBXL_UUID_BYTES(vtpm->uuid)));
+    flexarray_append(back, "resume");
+    flexarray_append(back, "False");
+
+    flexarray_append(front, "backend-id");
+    flexarray_append(front, GCSPRINTF("%d", vtpm->backend_domid));
+    flexarray_append(front, "state");
+    flexarray_append(front, GCSPRINTF("%d", 1));
+    flexarray_append(front, "handle");
+    flexarray_append(front, GCSPRINTF("%d", vtpm->devid));
+
+    flexarray_append(front, "domain-type");
+    flexarray_append(front, GCSPRINTF("%d", LIBXL_DOMAIN_TYPE_HVM));
+
+    libxl__device_generic_add(gc, XBT_NULL, device,
+                              libxl__xs_kvs_of_flexarray(gc, back, back->count),
+                              libxl__xs_kvs_of_flexarray(gc, front, front->count),
+                              NULL);
+
+    rc = 0;
+out:
     return;
 }
 
