@@ -1358,8 +1358,9 @@ static void domcreate_attach_vtpms(libxl__egc *egc,
        goto error_out;
    }
 
-    /* Plug vtpm devices */
-   if (d_config->num_vtpms > 0) {
+   /* Plug vtpm devices for para virtual domain*/
+   if (d_config->num_vtpms > 0 &&
+       d_config->b_info.type == LIBXL_DOMAIN_TYPE_PV) {
        /* Attach vtpms */
        libxl__multidev_begin(ao, &dcs->multidev);
        dcs->multidev.callback = domcreate_attach_pci;
