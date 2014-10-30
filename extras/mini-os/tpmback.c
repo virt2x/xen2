@@ -555,7 +555,7 @@ int connect_fe(tpmif_t* tpmif)
 {
    char path[512];
    char* err, *value;
-   uint32_t domid;
+   uint32_t domid, domtype;
    grant_ref_t ringref;
    evtchn_port_t evtchn;
 
@@ -608,14 +608,28 @@ int connect_fe(tpmif_t* tpmif)
    }
    free(value);
 
-   domid = tpmif->domid;
+   /* get the domain type*/
+   snprintf(path, 512, "%s/domain-type", tpmif->fe_path);
+   if ((err = xenbus_read(XBT_NIL, path, &value))) {
+       TPMBACK_ERR("xenbus_read(%s) Error = %s", path, err);
+       free(err);
+       return -1;
+   }
+   if (sscanf(value, "%d", &domtype) != 1) {
+       TPMBACK_ERR("Non integer value (%s) \n", value);
+       free(value);
+       return -1;
+   }
+
+   printk("domtype = %d \n",domtype);
+   domid = (domtype == T_DOMAIN_TYPE_HVM) ? 0 : tpmif->domid;
    if((tpmif->page = gntmap_map_grant_refs(&gtpmdev.map, 1, &domid, 0, &ringref, PROT_READ | PROT_WRITE)) == NULL) {
       TPMBACK_ERR("Failed to map grant reference %u/%u\n", (unsigned int) tpmif->domid, tpmif->handle);
       return -1;
    }
 
    /*Bind the event channel */
-   if((evtchn_bind_interdomain(tpmif->domid, evtchn, tpmback_handler, tpmif, &tpmif->evtchn)))
+   if((evtchn_bind_interdomain(domid, evtchn, tpmback_handler, tpmif, &tpmif->evtchn)))
    {
       TPMBACK_ERR("%u/%u Unable to bind to interdomain event channel!\n", (unsigned int) tpmif->domid, tpmif->handle);
       goto error_post_map;

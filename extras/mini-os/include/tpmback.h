@@ -41,6 +41,9 @@
 #ifndef TPMBACK_H
 #define TPMBACK_H
 
+#define T_DOMAIN_TYPE_HVM 1
+#define T_DOMAIN_TYPE_PV  2
+
 struct tpmcmd {
    domid_t domid;		/* Domid of the frontend */
    uint8_t locality;    /* Locality requested by the frontend */
