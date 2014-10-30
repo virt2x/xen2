@@ -197,6 +197,12 @@ else
 QEMU_XEN_ENABLE_DEBUG :=
 endif
 
+ifeq ($(QEMU_STUBDOM_VTPM),y)
+QEMU_TPM_ARGS="--enable-tpm"
+else
+QEMU_TPM_ARGS="--disable-tpm"
+endif
+
 subdir-all-qemu-xen-dir: qemu-xen-dir-find
 	if test -d $(QEMU_UPSTREAM_LOC) ; then \
 		source=$(QEMU_UPSTREAM_LOC); \
@@ -222,6 +228,7 @@ subdir-all-qemu-xen-dir: qemu-xen-dir-find
 		--datadir=$(SHAREDIR)/qemu-xen \
 		--localstatedir=$(localstatedir) \
 		--disable-kvm \
+                $(QEMU_TPM_ARGS) \
 		--disable-docs \
 		--disable-guest-agent \
 		--python=$(PYTHON) \

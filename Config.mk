@@ -254,6 +254,10 @@ endif
 OVMF_UPSTREAM_REVISION ?= 447d264115c476142f884af0be287622cd244423
 QEMU_UPSTREAM_REVISION ?= qemu-xen-4.5.0-rc1
 SEABIOS_UPSTREAM_REVISION ?= rel-1.7.5
+
+# Qemu stubdom vtpm frontend.
+QEMU_STUBDOM_VTPM ?= n
+
 # Thu May 22 16:59:16 2014 -0400
 # python3 fixes for vgabios and csm builds.
 
