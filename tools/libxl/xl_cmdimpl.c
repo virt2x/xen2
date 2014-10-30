@@ -1414,6 +1414,7 @@ static void parse_config_data(const char *config_source,
 
     if (!xlu_cfg_get_list(config, "vtpm", &vtpms, 0, 0)) {
         d_config->num_vtpms = 0;
+        b_info->num_vtpms = 0;
         d_config->vtpms = NULL;
         while ((buf = xlu_cfg_get_listitem (vtpms, d_config->num_vtpms)) != NULL) {
             libxl_device_vtpm *vtpm;
@@ -1456,6 +1457,7 @@ static void parse_config_data(const char *config_source,
             }
             free(buf2);
             d_config->num_vtpms++;
+            b_info->num_vtpms++;
         }
     }
 

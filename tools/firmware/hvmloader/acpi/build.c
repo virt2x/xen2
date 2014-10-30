@@ -313,9 +313,10 @@ static int construct_secondary_tables(unsigned long *table_ptrs,
 
     /* TPM TCPA and SSDT. */
     tis_hdr = (uint16_t *)0xFED40F00;
-    if ( (tis_hdr[0] == tis_signature[0]) &&
+    if ( ((tis_hdr[0] == tis_signature[0]) &&
          (tis_hdr[1] == tis_signature[1]) &&
-         (tis_hdr[2] == tis_signature[2]) )
+         (tis_hdr[2] == tis_signature[2])) ||
+         !strncmp(xenstore_read("platform/acpi_stubdom_vtpm", "1"), "1", 1) )
     {
         ssdt = mem_alloc(sizeof(ssdt_tpm), 16);
         if (!ssdt) return -1;

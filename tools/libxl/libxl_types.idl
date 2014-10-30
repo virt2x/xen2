@@ -379,6 +379,7 @@ libxl_domain_build_info = Struct("domain_build_info",[
     # if you set device_model you must set device_model_version too
     ("device_model",     string),
     ("device_model_ssidref", uint32),
+    ("num_vtpms", integer),
     ("device_model_ssid_label", string),
 
     # extra parameters pass directly to qemu, NULL terminated
