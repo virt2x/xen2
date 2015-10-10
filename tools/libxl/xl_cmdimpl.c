@@ -1414,7 +1414,6 @@ static void parse_config_data(const char *config_source,
 
     if (!xlu_cfg_get_list(config, "vtpm", &vtpms, 0, 0)) {
         d_config->num_vtpms = 0;
-        b_info->num_vtpms = 0;
         d_config->vtpms = NULL;
         while ((buf = xlu_cfg_get_listitem (vtpms, d_config->num_vtpms)) != NULL) {
             libxl_device_vtpm *vtpm;
@@ -1457,7 +1456,6 @@ static void parse_config_data(const char *config_source,
             }
             free(buf2);
             d_config->num_vtpms++;
-            b_info->num_vtpms++;
         }
     }
 
@@ -6492,8 +6490,8 @@ int main_vtpmattach(int argc, char **argv)
        return 0;
     }
 
-    if (libxl_device_vtpm_add(ctx, domid, &vtpm, 0)) {
-        fprintf(stderr, "libxl_device_vtpm_add failed.\n");
+    if (libxl_device_vtpm_add_pv(ctx, domid, LIBXL_DOMAIN_TYPE_PV, &vtpm, 0)) {
+        fprintf(stderr, "libxl_device_vtpm_add_pv failed.\n");
         return 1;
     }
     libxl_device_vtpm_dispose(&vtpm);

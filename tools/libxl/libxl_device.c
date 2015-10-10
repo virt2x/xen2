@@ -26,6 +26,13 @@ char *libxl__device_frontend_path(libxl__gc *gc, libxl__device *device)
     if (device->kind == LIBXL__DEVICE_KIND_CONSOLE && device->devid == 0)
         return GCSPRINTF("%s/console", dom_path);
 
+    /* vTPM for HVM virtual machine is a special case */
+    else if (device->backend_kind == LIBXL__DEVICE_KIND_VTPM &&
+             device->domid == 0)
+        return GCSPRINTF("/local/domain/0/frontend/%s/%u/%d",
+            libxl__device_kind_to_string(device->backend_kind),
+            device->backend_domid, device->devid);
+
     return GCSPRINTF("%s/device/%s/%d", dom_path,
                      libxl__device_kind_to_string(device->kind),
                      device->devid);
@@ -560,10 +567,29 @@ void libxl__multidev_prepared(libxl__egc *egc,
 
 DEFINE_DEVICES_ADD(disk)
 DEFINE_DEVICES_ADD(nic)
-DEFINE_DEVICES_ADD(vtpm)
 
 #undef DEFINE_DEVICES_ADD
 
+#define DEFINE_VTPM_ADD(_type)                                          \
+    void libxl__add_##_type##s(libxl__egc *egc, libxl__ao *ao,          \
+                               uint32_t domid,                          \
+                               libxl_domain_config *d_config,           \
+                               libxl__multidev *multidev)               \
+    {                                                                   \
+        AO_GC;                                                          \
+        int i;                                                          \
+        for (i = 0; i < d_config->num_##_type##s; i++) {                \
+            libxl__ao_device *aodev = libxl__multidev_prepare(multidev); \
+            libxl__device_##_type##_add(egc, domid,                     \
+                                           d_config->c_info.type,       \
+                                           &d_config->_type##s[i],      \
+                                           aodev);                      \
+        }                                                               \
+    }
+
+DEFINE_VTPM_ADD(vtpm)
+
+#undef DEFINE_VTPM_ADD
 /******************************************************************************/
 
 int libxl__device_destroy(libxl__gc *gc, libxl__device *dev)
@@ -624,10 +650,11 @@ void libxl__devices_destroy(libxl__egc *egc, libxl__devices_remove_state *drs)
 {
     STATE_AO_GC(drs->ao);
     uint32_t domid = drs->domid;
-    char *path;
-    unsigned int num_kinds, num_dev_xsentries;
-    char **kinds = NULL, **devs = NULL;
-    int i, j, rc = 0;
+    char *path, *dom_name, *name;
+    unsigned int num_kinds, num_fkinds, num_dev_xsentries, num_dev;
+    char **kinds = NULL, **fkinds = NULL, **devs = NULL, **sdevs = NULL,
+        **be_doms = NULL;
+    int i, j, k, rc = 0;
     libxl__device *dev;
     libxl__multidev *multidev = &drs->multidev;
     libxl__ao_device *aodev;
@@ -693,6 +720,58 @@ void libxl__devices_destroy(libxl__egc *egc, libxl__devices_remove_state *drs)
          * removing xenstore entries, this is what libxl__device_destroy does.
          */
         libxl__device_destroy(gc, dev);
+    }
+
+    /*
+     * Frontend device, such as vTPM, is under:
+     * /local/domain/0/frontend/{type}/{backend_dom_id}/{dev}
+     */
+    path = GCSPRINTF("/local/domain/%d/frontend", 0);
+    fkinds = libxl__xs_directory(gc, XBT_NULL, path, &num_fkinds);
+    if (!fkinds) {
+        if (errno != ENOENT) {
+            LOGE(ERROR, "unable to get xenstore device listing %s", path);
+            goto out;
+        }
+        num_fkinds = 0;
+    }
+
+    name = libxl_domid_to_name(CTX, domid);
+
+    /* /local/domain/0/frontend/{type} */
+    for (i = 0; i < num_fkinds; i++) {
+        if (libxl__device_kind_from_string(fkinds[i], &kind))
+            continue;
+
+        path = GCSPRINTF("/local/domain/0/frontend/%s", fkinds[i]);
+        be_doms = libxl__xs_directory(gc, XBT_NULL, path, &num_dev_xsentries);
+        if (!be_doms)
+            continue;
+
+        /* /local/domain/0/frontend/{type}/{backend_dom_id} */
+        for (j = 0; j < num_dev_xsentries; j++) {
+            path = GCSPRINTF("/local/domain/0/frontend/%s/%d",
+                              fkinds[i], atoi(be_doms[j]));
+            sdevs = libxl__xs_directory(gc, XBT_NULL, path, &num_dev);
+
+            /* /local/domain/0/frontend/{type}/{backend_dom_id}/{dev} */
+            for (k = 0; k < num_dev; k++) {
+                path = GCSPRINTF("/local/domain/0/frontend/%s/%d/%d/domain",
+                                 fkinds[i], atoi(be_doms[j]), atoi(sdevs[k]));
+                dom_name = libxl__xs_read(gc, XBT_NULL, path);
+                if (strcmp(name, dom_name)) {
+                    continue;
+                }
+
+                path = GCSPRINTF("/local/domain/0/frontend/%s/%d/%d/backend",
+                                 fkinds[i], atoi(be_doms[j]), atoi(sdevs[k]));
+                path = libxl__xs_read(gc, XBT_NULL, path);
+                GCNEW(dev);
+                if (path && strcmp(path, "") &&
+                    libxl__parse_backend_path(gc, path, dev) == 0)
+                    libxl__device_destroy(gc, dev);
+            }
+        }
     }
 
 out:

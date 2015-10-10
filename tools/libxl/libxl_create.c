@@ -441,7 +441,7 @@ int libxl__domain_build(libxl__gc *gc,
         localents[i++] = "platform/acpi_s4";
         localents[i++] = libxl_defbool_val(info->u.hvm.acpi_s4) ? "1" : "0";
         localents[i++] = "platform/acpi_stubdom_vtpm";
-        localents[i++] = (info->num_vtpms > 0) ? "1" : "0";
+        localents[i++] = (d_config->num_vtpms > 0) ? "1" : "0";
 
         if (info->u.hvm.mmio_hole_memkb) {
             uint64_t max_ram_below_4g =
@@ -901,10 +901,12 @@ static void initiate_domain_create(libxl__egc *egc,
             d_config->nics[i].devid = ++last_devid;
     }
 
-    if (d_config->c_info.type == LIBXL_DOMAIN_TYPE_HVM &&
-        d_config->num_vtpms > 0) {
-        ret = libxl__device_vtpm_setdefault(gc, d_config->vtpms);
-        if (ret) goto error_out;
+    if (d_config->c_info.type == LIBXL_DOMAIN_TYPE_HVM) {
+        for (i = 0; i < d_config->num_vtpms; i++) {
+            ret = libxl__device_vtpm_setdefault(gc, &d_config->vtpms[i]);
+            if (ret)
+                goto error_out;
+        }
     }
 
     if (restore_fd >= 0) {
@@ -1250,6 +1252,10 @@ static void domcreate_launch_dm(libxl__egc *egc, libxl__multidev *multidev,
         libxl__device_vkb_add(gc, domid, &vkb);
         libxl_device_vkb_dispose(&vkb);
 
+        /* Plug vtpm devices */
+        libxl__multidev_begin(ao, &dcs->multidev);
+        libxl__add_vtpms(egc, ao, domid, d_config, &dcs->multidev);
+
         dcs->dmss.dm.guest_domid = domid;
         if (libxl_defbool_val(d_config->b_info.device_model_stubdomain))
             libxl__spawn_stub_dm(egc, &dcs->dmss);
@@ -1367,7 +1373,7 @@ static void domcreate_attach_vtpms(libxl__egc *egc,
        goto error_out;
    }
 
-   /* Plug vtpm devices for para virtual domain*/
+   /* Plug vtpm devices for para virtual domain */
    if (d_config->num_vtpms > 0 &&
        d_config->b_info.type == LIBXL_DOMAIN_TYPE_PV) {
        /* Attach vtpms */

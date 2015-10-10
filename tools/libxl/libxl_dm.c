@@ -748,13 +748,15 @@ static char ** libxl__build_device_model_args_new(libxl__gc *gc,
         abort();
     }
 
-    /*add vTPM parameters for HVM virtual machine*/
+    /* Add vTPM parameters for HVM virtual machine */
     if (b_info->type == LIBXL_DOMAIN_TYPE_HVM &&
-        num_vtpms >0) {
+        num_vtpms > 0) {
         flexarray_vappend(dm_args, "-tpmdev",
-                          "xenstubdoms,id=xenvtpm0", NULL);
+                          libxl__sprintf(gc, "xenstubdoms,id=xenvtpm%d",
+                                         guest_domid), NULL);
         flexarray_vappend(dm_args,"-device",
-                          "tpm-tis,tpmdev=xenvtpm0", NULL);
+                          libxl__sprintf(gc, "tpm-tis,tpmdev=xenvtpm%d",
+                                         guest_domid), NULL);
     }
 
     ram_size = libxl__sizekb_to_mb(b_info->max_memkb - b_info->video_memkb);
@@ -1421,12 +1423,6 @@ retry_transaction:
     spawn->confirm_cb = device_model_confirm;
     spawn->failure_cb = device_model_startup_failed;
     spawn->detached_cb = device_model_detached;
-
-    /* Plug vtpm devices*/
-    if (b_info->type == LIBXL_DOMAIN_TYPE_HVM &&
-        guest_config->num_vtpms > 0){
-        libxl__device_hvm_vtpm_add(gc, domid, guest_config->vtpms);
-    }
 
     rc = libxl__spawn_spawn(egc, spawn);
     if (rc < 0)

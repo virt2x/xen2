@@ -1905,7 +1905,7 @@ out:
 }
 
 /* common function to get next device id */
-static int libxl__device_nextid(libxl__gc *gc, uint32_t domid, char *device)
+static int libxl__device_nextid(libxl__gc *gc, uint32_t domid, char *device, libxl_domain_type type)
 {
     char *dompath, **l;
     unsigned int nb;
@@ -1914,8 +1914,12 @@ static int libxl__device_nextid(libxl__gc *gc, uint32_t domid, char *device)
     if (!(dompath = libxl__xs_get_dompath(gc, domid)))
         return nextid;
 
-    l = libxl__xs_directory(gc, XBT_NULL,
-                            GCSPRINTF("%s/device/%s", dompath, device), &nb);
+    if (type == LIBXL_DOMAIN_TYPE_HVM)
+        l = libxl__xs_directory(gc, XBT_NULL,
+                                GCSPRINTF("/local/domain/0/frontend/%s/%u", device, domid), &nb);
+    else
+        l = libxl__xs_directory(gc, XBT_NULL,
+                                GCSPRINTF("%s/device/%s", dompath, device), &nb);
     if (l == NULL || nb == 0)
         nextid = 0;
     else
@@ -1958,8 +1962,9 @@ static int libxl__device_from_vtpm(libxl__gc *gc, uint32_t domid,
 }
 
 void libxl__device_vtpm_add(libxl__egc *egc, uint32_t domid,
-                           libxl_device_vtpm *vtpm,
-                           libxl__ao_device *aodev)
+                               libxl_domain_type type,
+                               libxl_device_vtpm *vtpm,
+                               libxl__ao_device *aodev)
 {
     STATE_AO_GC(aodev->ao);
     flexarray_t *front;
@@ -1981,17 +1986,38 @@ void libxl__device_vtpm_add(libxl__egc *egc, uint32_t domid,
     front = flexarray_make(gc, 16, 1);
     back = flexarray_make(gc, 16, 1);
 
-    if (vtpm->devid == -1) {
-        if ((vtpm->devid = libxl__device_nextid(gc, domid, "vtpm")) < 0) {
+    switch(type) {
+    case LIBXL_DOMAIN_TYPE_PV:
+    {
+        if (vtpm->devid == -1) {
+            if ((vtpm->devid = libxl__device_nextid(gc, domid, "vtpm", type)) < 0) {
+                rc = ERROR_FAIL;
+                goto out;
+	        }
+        }
+
+        libxl__update_config_vtpm(gc, &vtpm_saved, vtpm);
+
+        GCNEW(device);
+        rc = libxl__device_from_vtpm(gc, domid, vtpm, device);
+        break;
+    }
+	case LIBXL_DOMAIN_TYPE_HVM:
+	{
+        if ((vtpm->devid = libxl__device_nextid(gc, domid, "vtpm", type)) < 0) {
             rc = ERROR_FAIL;
             goto out;
         }
+
+        GCNEW(device);
+        rc = libxl__device_from_vtpm(gc, 0, vtpm, device);
+        break;
+    }
+    default:
+        rc = ERROR_FAIL;
+        goto out;
     }
 
-    libxl__update_config_vtpm(gc, &vtpm_saved, vtpm);
-
-    GCNEW(device);
-    rc = libxl__device_from_vtpm(gc, domid, vtpm, device);
     if ( rc != 0 ) goto out;
 
     flexarray_append(back, "frontend-id");
@@ -2015,9 +2041,11 @@ void libxl__device_vtpm_add(libxl__egc *egc, uint32_t domid,
     flexarray_append(front, "handle");
     flexarray_append(front, GCSPRINTF("%d", vtpm->devid));
 
-    /*for para virtual machine*/
-    flexarray_append(front, "domain-type");
-    flexarray_append(front, GCSPRINTF("%d", LIBXL_DOMAIN_TYPE_PV));
+    if (type == LIBXL_DOMAIN_TYPE_HVM)
+    {
+        flexarray_append(front, "domain");
+        flexarray_append(front, GCSPRINTF("%s", libxl__domid_to_name(gc, domid)));
+    }
 
     if (aodev->update_json) {
         lock = libxl__lock_domain_userdata(gc, domid);
@@ -2074,64 +2102,6 @@ out:
     libxl_domain_config_dispose(&d_config);
     aodev->rc = rc;
     if(rc) aodev->callback(egc, aodev);
-    return;
-}
-
-void libxl__device_hvm_vtpm_add(libxl__gc *gc, uint32_t domid,
-                                libxl_device_vtpm *vtpm)
-{
-    flexarray_t *front;
-    flexarray_t *back;
-    libxl__device *device;
-    unsigned int rc;
-
-    rc = libxl__device_vtpm_setdefault(gc, vtpm);
-    if (rc) goto out;
-
-    front = flexarray_make(gc, 16, 1);
-    back = flexarray_make(gc, 16, 1);
-
-    if (vtpm->devid == -1) {
-        if ((vtpm->devid = libxl__device_nextid(gc, domid, "vtpm")) < 0) {
-            rc = ERROR_FAIL;
-            goto out;
-        }
-    }
-
-    GCNEW(device);
-    rc = libxl__device_from_vtpm(gc, domid, vtpm, device);
-    if ( rc != 0 ) goto out;
-    flexarray_append(back, "frontend-id");
-    flexarray_append(back, GCSPRINTF("%d", domid));
-    flexarray_append(back, "online");
-    flexarray_append(back, "1");
-    flexarray_append(back, "state");
-    flexarray_append(back, GCSPRINTF("%d", 1));
-    flexarray_append(back, "handle");
-    flexarray_append(back, GCSPRINTF("%d", vtpm->devid));
-
-    flexarray_append(back, "uuid");
-    flexarray_append(back, GCSPRINTF(LIBXL_UUID_FMT, LIBXL_UUID_BYTES(vtpm->uuid)));
-    flexarray_append(back, "resume");
-    flexarray_append(back, "False");
-
-    flexarray_append(front, "backend-id");
-    flexarray_append(front, GCSPRINTF("%d", vtpm->backend_domid));
-    flexarray_append(front, "state");
-    flexarray_append(front, GCSPRINTF("%d", 1));
-    flexarray_append(front, "handle");
-    flexarray_append(front, GCSPRINTF("%d", vtpm->devid));
-
-    flexarray_append(front, "domain-type");
-    flexarray_append(front, GCSPRINTF("%d", LIBXL_DOMAIN_TYPE_HVM));
-
-    libxl__device_generic_add(gc, XBT_NULL, device,
-                              libxl__xs_kvs_of_flexarray(gc, back, back->count),
-                              libxl__xs_kvs_of_flexarray(gc, front, front->count),
-                              NULL);
-
-    rc = 0;
-out:
     return;
 }
 
@@ -3322,7 +3292,7 @@ void libxl__device_nic_add(libxl__egc *egc, uint32_t domid,
     back = flexarray_make(gc, 18, 1);
 
     if (nic->devid == -1) {
-        if ((nic->devid = libxl__device_nextid(gc, domid, "vif")) < 0) {
+        if ((nic->devid = libxl__device_nextid(gc, domid, "vif", -1)) < 0) {
             rc = ERROR_FAIL;
             goto out;
         }
@@ -3990,7 +3960,7 @@ int libxl__device_vkb_add(libxl__gc *gc, uint32_t domid,
     back = flexarray_make(gc, 16, 1);
 
     if (vkb->devid == -1) {
-        if ((vkb->devid = libxl__device_nextid(gc, domid, "vkb")) < 0) {
+        if ((vkb->devid = libxl__device_nextid(gc, domid, "vkb", -1)) < 0) {
             rc = ERROR_FAIL;
             goto out;
         }
@@ -4091,7 +4061,7 @@ int libxl__device_vfb_add(libxl__gc *gc, uint32_t domid, libxl_device_vfb *vfb)
     back = flexarray_make(gc, 16, 1);
 
     if (vfb->devid == -1) {
-        if ((vfb->devid = libxl__device_nextid(gc, domid, "vfb")) < 0) {
+        if ((vfb->devid = libxl__device_nextid(gc, domid, "vfb", -1)) < 0) {
             rc = ERROR_FAIL;
             goto out;
         }
@@ -4241,10 +4211,29 @@ DEFINE_DEVICE_ADD(disk)
 /* nic */
 DEFINE_DEVICE_ADD(nic)
 
-/* vtpm */
-DEFINE_DEVICE_ADD(vtpm)
-
 #undef DEFINE_DEVICE_ADD
+
+#define DEFINE_VTPM_ADD_PV(type)                                        \
+    int libxl_device_##type##_add_pv(libxl_ctx *ctx,                    \
+        uint32_t domid, libxl_domain_type dom_type,                     \
+        libxl_device_##type *type,                                      \
+        const libxl_asyncop_how *ao_how)                                \
+    {                                                                   \
+        AO_CREATE(ctx, domid, ao_how);                                  \
+        libxl__ao_device *aodev;                                        \
+                                                                        \
+        GCNEW(aodev);                                                   \
+        libxl__prepare_ao_device(ao, aodev);                            \
+        aodev->callback = device_addrm_aocomplete;                      \
+        aodev->update_json = true;                                      \
+        libxl__device_##type##_add(egc, domid,                          \
+                                   dom_type, type, aodev);              \
+                                                                        \
+        return AO_INPROGRESS;                                           \
+    }
+
+/* vtpm */
+DEFINE_VTPM_ADD_PV(vtpm)
 
 /******************************************************************************/
 

@@ -555,7 +555,7 @@ int connect_fe(tpmif_t* tpmif)
 {
    char path[512];
    char* err, *value;
-   uint32_t domid, domtype;
+   uint32_t domid;
    grant_ref_t ringref;
    evtchn_port_t evtchn;
 
@@ -580,7 +580,7 @@ int connect_fe(tpmif_t* tpmif)
    free(value);
 
 
-   /* Fetch the event channel*/
+   /* Fetch the event channel */
    snprintf(path, 512, "%s/event-channel", tpmif->fe_path);
    if((err = xenbus_read(XBT_NIL, path, &value))) {
       TPMBACK_ERR("Error creating new tpm instance xenbus_read(%s) Error = %s", path, err);
@@ -608,32 +608,21 @@ int connect_fe(tpmif_t* tpmif)
    }
    free(value);
 
-   /* get the domain type*/
-   snprintf(path, 512, "%s/domain-type", tpmif->fe_path);
-   if ((err = xenbus_read(XBT_NIL, path, &value))) {
-       TPMBACK_ERR("xenbus_read(%s) Error = %s", path, err);
-       free(err);
-       return -1;
-   }
-   if (sscanf(value, "%d", &domtype) != 1) {
-       TPMBACK_ERR("Non integer value (%s) \n", value);
-       free(value);
-       return -1;
-   }
+    domid = (unsigned int)tpmif->domid;
+    if ((tpmif->page = gntmap_map_grant_refs(&gtpmdev.map, 1, &domid, 0, &ringref,
+                                             PROT_READ | PROT_WRITE)) == NULL) {
+        TPMBACK_ERR("Failed to map grant reference %u/%u\n",
+                    tpmif->domid, tpmif->handle);
+        return -1;
+    }
 
-   printk("domtype = %d \n",domtype);
-   domid = (domtype == T_DOMAIN_TYPE_HVM) ? 0 : tpmif->domid;
-   if((tpmif->page = gntmap_map_grant_refs(&gtpmdev.map, 1, &domid, 0, &ringref, PROT_READ | PROT_WRITE)) == NULL) {
-      TPMBACK_ERR("Failed to map grant reference %u/%u\n", (unsigned int) tpmif->domid, tpmif->handle);
-      return -1;
-   }
+    /* Bind the event channel */
+    if ((evtchn_bind_interdomain(domid, evtchn, tpmback_handler, tpmif, &tpmif->evtchn))) {
+        TPMBACK_ERR("%u/%u Unable to bind to interdomain event channel!\n",
+                    (unsigned int) tpmif->domid, tpmif->handle);
+        goto error_post_map;
+    }
 
-   /*Bind the event channel */
-   if((evtchn_bind_interdomain(domid, evtchn, tpmback_handler, tpmif, &tpmif->evtchn)))
-   {
-      TPMBACK_ERR("%u/%u Unable to bind to interdomain event channel!\n", (unsigned int) tpmif->domid, tpmif->handle);
-      goto error_post_map;
-   }
    unmask_evtchn(tpmif->evtchn);
 
    /* Write the ready flag and change status to connected */
@@ -743,10 +732,16 @@ static int parse_eventstr(const char* evstr, domid_t* domid, unsigned int* handl
 	 return EV_NONE;
       }
       return EV_NEWFE;
-   } else if((ret = sscanf(evstr, "/local/domain/%u/device/vtpm/%u/%40s", &udomid, handle, cmd)) == 3) {
-      *domid = udomid;
-      if (!strcmp(cmd, "state"))
-	 return EV_STCHNG;
+    } else if((ret = sscanf(evstr, "/local/domain/%u/device/vtpm/%u/%40s",
+                            &udomid, handle, cmd)) == 3) {
+        *domid = udomid;
+        if (!strcmp(cmd, "state"))
+            return EV_STCHNG;
+    } else if((ret = sscanf(evstr, "/local/domain/0/frontend/vtpm/%u/%u/%40s",
+                            &udomid, handle, cmd)) == 3) {
+        *domid = 0;
+        if (!strcmp(cmd, "state"))
+            return EV_STCHNG;
    }
    return EV_NONE;
 }
